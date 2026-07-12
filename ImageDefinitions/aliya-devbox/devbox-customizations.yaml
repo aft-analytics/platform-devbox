@@ -76,9 +76,11 @@ tasks:
 
   # --- IDEs ----------------------------------------------------------------
   - name: ~/winget
-    description: Install Visual Studio 2026 (Community)
+    description: Install Visual Studio 2026 (Community) with ASP.NET and .NET MAUI workloads
     parameters:
       package: Microsoft.VisualStudio.Community
+      # Add ASP.NET/web development and .NET MAUI (cross-platform) workloads.
+      override: "--quiet --norestart --wait --add Microsoft.VisualStudio.Workload.NetWeb --add Microsoft.VisualStudio.Workload.NetCrossPlat --includeRecommended"
 
   - name: ~/winget
     description: Install Visual Studio Code

@@ -4,7 +4,7 @@ Microsoft Dev Box [team customization](https://learn.microsoft.com/azure/dev-box
 
 ## Definitions
 
-- [`aliya-devbox`](aliya-devbox/imagedefinition.yaml): Visual Studio 2026 (Community), Visual Studio Code, Node.js LTS, and Rancher Desktop on a WSL2 backend.
+- [`aliya-devbox`](aliya-devbox/imagedefinition.yaml): Visual Studio 2026 (Community, with the ASP.NET/web and .NET MAUI workloads), Visual Studio Code, Node.js LTS, and Rancher Desktop on a WSL2 backend.
 
 ### Containers: Rancher Desktop, not Docker Desktop
 
