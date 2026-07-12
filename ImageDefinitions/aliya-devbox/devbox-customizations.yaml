@@ -1,0 +1,98 @@
+$schema: "1.0"
+
+# Microsoft Dev Box per-box customization file.
+# Upload this in the developer portal when creating a dev box:
+#   Create dev box  ->  Add customizations  ->  Upload a customization file.
+#
+# The pool supplies the base image and compute; these tasks run on top of it.
+# NOTE: the ~/winget and ~/powershell built-in tasks must be available in a
+# catalog attached to the project (they ship with the Microsoft "quickstart"
+# built-in tasks). If the upload validation rejects a task, ask the platform
+# team to attach the built-in tasks catalog to Platform-Develop.
+#
+# Docker Desktop is intentionally NOT installed. Rancher Desktop provides the
+# container runtime (moby/dockerd) and the docker-compatible CLI over WSL2.
+
+tasks:
+  # --- Remove Docker Desktop if the base image ships with it ---------------
+  - name: ~/powershell
+    description: Uninstall Docker Desktop if already installed
+    parameters:
+      command: |
+        $ErrorActionPreference = 'Continue'
+
+        # 1) Try winget (Docker Desktop's winget id is Docker.DockerDesktop).
+        $winget = Get-Command winget -ErrorAction SilentlyContinue
+        if ($winget) {
+          $listed = winget list --id Docker.DockerDesktop --exact 2>$null
+          if ($LASTEXITCODE -eq 0 -and ($listed -match 'Docker.DockerDesktop')) {
+            Write-Host 'Docker Desktop found via winget - uninstalling...'
+            winget uninstall --id Docker.DockerDesktop --exact --silent `
+              --accept-source-agreements --disable-interactivity 2>$null
+          }
+        }
+
+        # 2) Fallback: locate Docker Desktop's own uninstaller from the registry.
+        $keys = @(
+          'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+          'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+        )
+        $entry = Get-ItemProperty $keys -ErrorAction SilentlyContinue |
+                 Where-Object { $_.DisplayName -like 'Docker Desktop*' } |
+                 Select-Object -First 1
+        if ($entry) {
+          Write-Host "Docker Desktop found in registry: $($entry.DisplayName) - uninstalling..."
+          $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop Installer.exe'
+          if (Test-Path $exe) {
+            Start-Process -FilePath $exe -ArgumentList 'uninstall','--quiet' -Wait
+          } elseif ($entry.QuietUninstallString) {
+            Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $entry.QuietUninstallString -Wait
+          }
+        } else {
+          Write-Host 'Docker Desktop not detected - nothing to uninstall.'
+        }
+
+        # 3) Clean up Docker Desktop's WSL distros so they don't linger or
+        #    conflict with Rancher Desktop's backend.
+        $wsl = Get-Command wsl -ErrorAction SilentlyContinue
+        if ($wsl) {
+          $distros = (wsl --list --quiet) -replace "`0", '' |
+                     ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          foreach ($d in 'docker-desktop', 'docker-desktop-data') {
+            if ($distros -contains $d) {
+              Write-Host "Unregistering leftover WSL distro: $d"
+              wsl --unregister $d 2>$null
+            }
+          }
+        }
+
+  # --- WSL2 (must be enabled before Rancher Desktop) -----------------------
+  - name: ~/powershell
+    description: Enable WSL2 (required by Rancher Desktop backend)
+    parameters:
+      command: |
+        wsl --install --no-distribution
+        wsl --set-default-version 2
+
+  # --- IDEs ----------------------------------------------------------------
+  - name: ~/winget
+    description: Install Visual Studio 2026 (Community)
+    parameters:
+      package: Microsoft.VisualStudio.Community
+
+  - name: ~/winget
+    description: Install Visual Studio Code
+    parameters:
+      package: Microsoft.VisualStudioCode
+
+  # --- Runtimes ------------------------------------------------------------
+  - name: ~/winget
+    description: Install Node.js LTS
+    parameters:
+      package: OpenJS.NodeJS.LTS
+
+  # --- Containers ----------------------------------------------------------
+  - name: ~/winget
+    description: Install Rancher Desktop (replaces Docker Desktop)
+    parameters:
+      package: SUSE.RancherDesktop
