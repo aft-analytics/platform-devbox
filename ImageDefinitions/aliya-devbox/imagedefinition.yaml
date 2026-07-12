@@ -1,0 +1,105 @@
+$schema: "1.0"
+
+# Microsoft Dev Box team customization / image definition.
+# Provisions a developer box with Visual Studio 2026, VS Code, Rancher Desktop
+# (WSL2 backend enabled) and Node.js LTS.
+#
+# NOTE: Docker Desktop is intentionally NOT installed. Rancher Desktop provides
+# the container runtime (moby/dockerd) and the `docker`/`nerdctl` CLIs through
+# its WSL2 backend, so a separate Docker Desktop install is redundant and is
+# deliberately excluded here.
+
+name: aliya-devbox
+# Clean Windows 11 base image (no IDE preinstalled — we install VS 2026 below).
+image: microsoftwindowsdesktop_windows-ent-cpc_win11-24h2-ent-cpc-m365-gen2
+
+tasks:
+  # --- Remove Docker Desktop if the base image ships with it ---------------
+  # Rancher Desktop is the supported container runtime here, so uninstall any
+  # preinstalled Docker Desktop to avoid conflicting engines/WSL distros.
+  - name: ~/powershell
+    description: Uninstall Docker Desktop if already installed
+    parameters:
+      command: |
+        $ErrorActionPreference = 'Continue'
+
+        # 1) Try winget (Docker Desktop's winget id is Docker.DockerDesktop).
+        $winget = Get-Command winget -ErrorAction SilentlyContinue
+        if ($winget) {
+          $listed = winget list --id Docker.DockerDesktop --exact 2>$null
+          if ($LASTEXITCODE -eq 0 -and ($listed -match 'Docker.DockerDesktop')) {
+            Write-Host 'Docker Desktop found via winget - uninstalling...'
+            winget uninstall --id Docker.DockerDesktop --exact --silent `
+              --accept-source-agreements --disable-interactivity 2>$null
+          }
+        }
+
+        # 2) Fallback: locate Docker Desktop's own uninstaller from the registry.
+        $keys = @(
+          'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+          'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+        )
+        $entry = Get-ItemProperty $keys -ErrorAction SilentlyContinue |
+                 Where-Object { $_.DisplayName -like 'Docker Desktop*' } |
+                 Select-Object -First 1
+        if ($entry) {
+          Write-Host "Docker Desktop found in registry: $($entry.DisplayName) - uninstalling..."
+          $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop Installer.exe'
+          if (Test-Path $exe) {
+            Start-Process -FilePath $exe -ArgumentList 'uninstall','--quiet' -Wait
+          } elseif ($entry.QuietUninstallString) {
+            Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $entry.QuietUninstallString -Wait
+          }
+        } else {
+          Write-Host 'Docker Desktop not detected - nothing to uninstall.'
+        }
+
+        # 3) Clean up Docker Desktop's WSL distros so they don't linger or
+        #    conflict with Rancher Desktop's backend.
+        $wsl = Get-Command wsl -ErrorAction SilentlyContinue
+        if ($wsl) {
+          $distros = (wsl --list --quiet) -replace "`0", '' |
+                     ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          foreach ($d in 'docker-desktop', 'docker-desktop-data') {
+            if ($distros -contains $d) {
+              Write-Host "Unregistering leftover WSL distro: $d"
+              wsl --unregister $d 2>$null
+            }
+          }
+        }
+
+  # --- WSL2 (must be enabled before Rancher Desktop) -----------------------
+  - name: ~/powershell
+    description: Enable WSL2 (required by Rancher Desktop backend)
+    parameters:
+      command: |
+        # Install WSL without a default distro; Rancher Desktop manages its own.
+        wsl --install --no-distribution
+        wsl --set-default-version 2
+
+  # --- IDEs ----------------------------------------------------------------
+  - name: ~/winget
+    description: Install Visual Studio 2026 (Community) with ASP.NET and .NET MAUI workloads
+    parameters:
+      package: Microsoft.VisualStudio.Community
+      # Add ASP.NET/web development and .NET MAUI (cross-platform) workloads.
+      override: "--quiet --norestart --wait --add Microsoft.VisualStudio.Workload.NetWeb --add Microsoft.VisualStudio.Workload.NetCrossPlat --includeRecommended"
+
+  - name: ~/winget
+    description: Install Visual Studio Code
+    parameters:
+      package: Microsoft.VisualStudioCode
+
+  # --- Runtimes ------------------------------------------------------------
+  - name: ~/winget
+    description: Install Node.js LTS
+    parameters:
+      package: OpenJS.NodeJS.LTS
+
+  # --- Containers ----------------------------------------------------------
+  # Rancher Desktop replaces Docker Desktop; it runs on the WSL2 backend
+  # enabled above and ships the docker-compatible CLI.
+  - name: ~/winget
+    description: Install Rancher Desktop
+    parameters:
+      package: SUSE.RancherDesktop
